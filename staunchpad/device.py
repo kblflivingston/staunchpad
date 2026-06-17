@@ -79,6 +79,7 @@ class Launchpad:
         self._layout = layout
         self._out = None
         self._in = None
+        self._send_lock = threading.Lock()
         self._global_handlers: list[Handler] = []
         self._button_handlers: dict[tuple[int, int], list[tuple[str, Handler]]] = {}
         self._inquiry_event = threading.Event()
@@ -142,7 +143,9 @@ class Launchpad:
     def _send(self, data: list[int]) -> None:
         if self._out is None:
             raise RuntimeError("Launchpad is not open")
-        self._out.send(mido.Message.from_bytes(bytes(data)))
+        # serialise writes so the animation thread + action workers don't interleave
+        with self._send_lock:
+            self._out.send(mido.Message.from_bytes(bytes(data)))
 
     def send_raw(self, data: list[int]) -> None:
         """Escape hatch: put arbitrary MIDI bytes on the wire."""

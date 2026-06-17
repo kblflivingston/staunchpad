@@ -126,6 +126,52 @@ ColorCycle(app, 2, 1, palette=[color.RED, color.YELLOW, color.GREEN])
 app.run()
 ```
 
+## Prompt console
+
+The `Console` turns the grid into a panel of **prompt buttons** with built-in
+press → running → complete/error → idle colour feedback, plus ambient
+animations on whatever region you like.
+
+A `PromptButton` doesn't run the prompt itself — it **signals** it to an
+always-on agent through a tiny file-based job queue, and the LED tracks the job's
+lifecycle as the agent reports back:
+
+```
+[board]  press → write a job to the queue dir → LED pulses (running)
+[agent]  watches the queue → dispatches the prompt to a subagent → writes status
+[board]  watches status → LED green (done) / red (error) → fades back to idle
+```
+
+```python
+from staunchpad import Console, PromptButton, ActionButton, color
+from staunchpad.animations import Twinkle, RainbowWave, rect
+
+con = Console()                                        # opens the device + a JobQueue
+
+PromptButton(con, 0, 1, "Summarise today's commits", label="standup",
+             color=color.rgb(0, 30, 45))               # idle hue (auto-dimmed)
+PromptButton(con, 1, 1, "Draft release notes from the diff", label="relnote",
+             color=color.rgb(30, 0, 40))
+
+ActionButton.shell(con, 7, 1, "say hi")                # local action (synchronous)
+
+con.animate(Twinkle(rect(0, 6, 7, 7)))                 # pretty ambient region
+con.animate(RainbowWave(rect(0, 8, 7, 8)))
+con.run()
+```
+
+The **agent side** is just a watcher on the same queue directory. A starter
+dispatcher is in `examples/dispatcher.py` (run it with `--dry-run`, or
+`--cmd 'claude -p {prompt}'` to feed each prompt to headless Claude Code). For
+the "persistent agent dispatches to a subagent" pattern, point a long-running
+Claude Code session at the queue and have it call the Agent tool per job, then
+mark each job `done`/`error`. The job-file contract lives in
+`staunchpad/dispatch.py`.
+
+State colours are configurable per button; `running`/`error` use the hardware
+pulse/flash when given palette colours. Animations use RGB and are diffed each
+frame, so only changed LEDs are sent.
+
 ## Examples
 
 | File | What it shows |
@@ -135,6 +181,8 @@ app.run()
 | `examples/app_demo.py` | The widget layer: toggles, momentaries, radio group |
 | `examples/soundboard.py` | Grid buttons fire shell commands, with run/fail feedback |
 | `examples/scene_recall.py` | Edit grid patterns; save/recall to the scene buttons |
+| `examples/prompt_console.py` | Prompt buttons + state colours + ambient animations |
+| `examples/dispatcher.py` | The agent side: watch the queue, dispatch, report back |
 
 ## Tests
 

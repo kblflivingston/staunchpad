@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `Console`: a high-level panel of programmable buttons with a press → running →
+  complete/error → idle state machine, configurable per-state colours, and
+  brightness dimming.
+- `PromptButton` / `ActionButton`: buttons that signal a prompt to an always-on
+  agent (via the job queue) or run a local action synchronously.
+- `dispatch.JobQueue`: a tiny atomic file-based job queue — the "signal" between
+  the board and your agent — plus a reference `examples/dispatcher.py`.
+- `animations`: ambient `Breathe` / `Twinkle` / `RainbowWave` over `rect` / `row`
+  / `col` / `cells` regions, diffed and rendered each frame.
+- `Color.dimmed()` / `color.dim()` for smooth RGB brightness scaling.
+- A MIDI write lock so the animation loop and action workers can share the device.
+
 ## [0.1.0]
 
 Initial release. Full programming interface for the **Novation Launchpad MK2**,

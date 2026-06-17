@@ -49,6 +49,19 @@ class Color:
             return any(self.rgb)
         return self.index != 0
 
+    def dimmed(self, level: float) -> "Color":
+        """Scale brightness by ``level`` in 0..1. Smooth for RGB colours; palette
+        colours can't be scaled precisely, so they are returned unchanged."""
+        level = max(0.0, min(1.0, level))
+        if self.is_rgb:
+            return Color(rgb=tuple(round(v * level) for v in self.rgb))
+        return self
+
+
+def dim(color, level: float) -> "Color":
+    """Functional form of :meth:`Color.dimmed` that also accepts names/ints/lists."""
+    return parse(color).dimmed(level)
+
 
 def palette(index: int) -> Color:
     """A colour from the 128-entry preset palette (0 = off)."""
