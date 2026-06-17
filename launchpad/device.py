@@ -1,4 +1,5 @@
-"""The :class:`Launchpad` device handle: I/O, LEDs, scenes, and events."""
+"""The :class:`Launchpad` device handle for the Launchpad MK2: I/O, LEDs,
+flash/pulse, RGB, scenes, text, and button events."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import mido
 
 from . import layout as L
 from . import protocol as P
-from .color import OFF, Color, FLAG_CLEAR, FLAG_COPY, parse as parse_color
+from .color import Color, OFF, parse as parse_color
 
 Handler = Callable[["ButtonEvent"], None]
 
@@ -23,11 +24,11 @@ class ButtonEvent:
     """A button press or release.
 
     Attributes:
-        x, y:      surface coordinates (see :mod:`launchpad.layout`).
-        pressed:   ``True`` on press, ``False`` on release.
-        velocity:  raw MIDI velocity/value (127 on press, 0 on release).
-        kind:      ``"note"`` (grid/scene) or ``"cc"`` (top row).
-        number:    the raw MIDI note or CC number.
+        x, y:     surface coordinates (see :mod:`launchpad.layout`).
+        pressed:  ``True`` on press, ``False`` on release.
+        velocity: raw MIDI velocity/value (127 on press, 0 on release).
+        kind:     ``"note"`` (grid/scene) or ``"cc"`` (top row).
+        number:   the raw MIDI note or CC number.
     """
 
     __slots__ = ("x", "y", "pressed", "velocity", "kind", "number")
@@ -57,31 +58,29 @@ def list_ports() -> dict[str, list[str]]:
 
 
 class Launchpad:
-    """A connection to a legacy Launchpad.
+    """A connection to a Launchpad MK2.
 
-    Open it directly (auto-detects the first port whose name contains
-    ``name``)::
+    ::
 
-        lp = Launchpad()
-        lp.set(0, 1, color.RED)
+        lp = Launchpad()                 # auto-detects the first "Launchpad" port
+        lp.set(0, 1, color.RED)          # palette colour (1 MIDI message)
+        lp.set(7, 8, color.rgb(0, 0, 63))# exact RGB (SysEx)
+        lp.pulse(4, 4, color.GREEN)      # hardware pulse
 
-    or as a context manager, which resets the surface on the way out::
+        @lp.on_press(0, 0)
+        def _(ev): print("pressed", ev)
 
-        with Launchpad() as lp:
-            lp.fill(color.GREEN)
-            lp.run()
+        lp.run()
     """
 
-    def __init__(self, name: str = "Launchpad", layout: int = L.LAYOUT_XY,
+    def __init__(self, name: str = "Launchpad", layout: int = P.LAYOUT_SESSION,
                  auto_open: bool = True):
         self.name = name
         self._layout = layout
         self._out = None
         self._in = None
         self._global_handlers: list[Handler] = []
-        # (x, y) -> list of (when, handler); when in {"press","release","both"}
         self._button_handlers: dict[tuple[int, int], list[tuple[str, Handler]]] = {}
-        self._flashing = False
         self._inquiry_event = threading.Event()
         self._inquiry_data: list[int] | None = None
         self.identity: dict | None = None
@@ -109,13 +108,13 @@ class Launchpad:
         if in_name:
             self._in = mido.open_input(in_name, callback=self._dispatch)
         self.set_layout(self._layout)
-        self.reset()
+        self.clear()
         return self
 
     def close(self) -> None:
         try:
             if self._out:
-                self.reset()
+                self.clear()
         finally:
             if self._in:
                 self._in.close()
@@ -150,133 +149,126 @@ class Launchpad:
         self._send(data)
 
     # -- configuration ------------------------------------------------------
-    def reset(self) -> None:
-        """All LEDs off, settings back to defaults."""
-        self._send(P.reset_msg())
-        self._flashing = False
-
     def set_layout(self, layout: int) -> None:
         self._layout = layout
         self._send(P.layout_msg(layout))
 
-    def all_on(self, intensity: int = 2) -> None:
-        """Light every LED amber (a quick hardware sanity check)."""
-        self._send(P.all_leds_on_msg(intensity))
-
-    def set_brightness(self, numerator: int, denominator: int) -> None:
-        """Scale overall brightness to the fraction ``numerator/denominator``."""
-        self._send(P.brightness_msg(numerator, denominator))
-
     # -- single LED ---------------------------------------------------------
-    def set(self, x: int, y: int, color, flag: int = FLAG_COPY) -> None:
-        """Light the LED at (x, y). ``color`` may be a Color, name, or [r,g]."""
+    def set(self, x: int, y: int, color) -> None:
+        """Light the LED at (x, y). Accepts a Color, palette int, name, or [r,g,b]."""
         color = parse_color(color)
         kind, number = L.xy_to_midi(x, y)
-        vel = color.velocity(flag)
-        if kind == "cc":
-            self._send(P.led_cc_msg(number, vel))
+        if color.is_rgb:
+            self._send(P.set_led_rgb_msg(number, *color.rgb))
+        elif kind == "cc":
+            self._send(P.cc_msg(number, color.velocity(), P.CH_STATIC))
         else:
-            self._send(P.led_note_msg(number, vel))
+            self._send(P.note_msg(number, color.velocity(), P.CH_STATIC))
 
     def off(self, x: int, y: int) -> None:
         self.set(x, y, OFF)
 
-    def set_note(self, note: int, velocity: int) -> None:
-        """Raw note LED (use with the drum-rack layout or custom maps)."""
-        self._send(P.led_note_msg(note, velocity))
+    def set_note(self, note: int, velocity: int, channel: int = P.CH_STATIC) -> None:
+        """Raw note LED (use with non-Session layouts or custom maps)."""
+        self._send(P.note_msg(note, velocity, channel))
 
-    def set_cc(self, cc: int, velocity: int) -> None:
-        self._send(P.led_cc_msg(cc, velocity))
+    def set_cc(self, cc: int, value: int, channel: int = P.CH_STATIC) -> None:
+        self._send(P.cc_msg(cc, value, channel))
 
-    # -- bulk -------------------------------------------------------------
-    def fill(self, color) -> None:
-        """Set the whole surface to one colour via a fast rapid update."""
-        self.render({pos: color for pos in L.rapid_order()})
-
-    def clear(self) -> None:
-        self.reset()
-
-    def render(self, grid: Mapping[tuple[int, int], object], flag: int = FLAG_COPY,
-               fast: bool = True) -> None:
-        """Paint the whole surface from a ``{(x, y): color}`` mapping.
-
-        Missing coordinates default to off. With ``fast=True`` (default) this
-        uses the channel-3 rapid-update stream (40 messages for all 80 LEDs);
-        ``fast=False`` sends one message per LED (handy when debugging).
-        """
-        if fast:
-            # A ch.1 message first resets the rapid cursor to the top-left.
-            self._send(P.layout_msg(self._layout))
-            vels = []
-            for pos in L.rapid_order():
-                c = grid.get(pos, OFF)
-                vels.append(parse_color(c).velocity(flag))
-            for msg in P.rapid_msgs(vels):
-                self._send(msg)
+    # -- flash / pulse (palette colours only) -------------------------------
+    def _palette_channel(self, x, y, color, channel, what):
+        color = parse_color(color)
+        if color.is_rgb:
+            raise ValueError(f"{what} needs a palette colour, not RGB "
+                             f"(the MK2 can't {what} arbitrary RGB)")
+        kind, number = L.xy_to_midi(x, y)
+        if kind == "cc":
+            self._send(P.cc_msg(number, color.velocity(), channel))
         else:
-            for x, y in L.rapid_order():
-                self.set(x, y, grid.get((x, y), OFF), flag)
-
-    # -- flashing -----------------------------------------------------------
-    def begin_flash(self) -> None:
-        """Enter hardware flash mode (display swaps every 280 ms)."""
-        self._send(P.buffer_msg(P.BUF_FLASH))
-        self._flashing = True
-
-    def end_flash(self) -> None:
-        self._send(P.buffer_msg(P.BUF_SIMPLE))
-        self._flashing = False
+            self._send(P.note_msg(number, color.velocity(), channel))
 
     def flash(self, x: int, y: int, color) -> None:
-        """Make one LED flash ``color``. Enters flash mode automatically.
+        """Flash between the LED's current colour and ``color`` (palette only).
 
-        Other LEDs set with :meth:`set` stay solid while flash mode is on.
-        Call :meth:`end_flash` to stop.
+        Set a base colour first with :meth:`set` to flash *between two colours*;
+        otherwise it flashes between off and ``color``. Stop with :meth:`set`/:meth:`off`.
         """
-        if not self._flashing:
-            self.begin_flash()
-        self.set(x, y, color, flag=FLAG_CLEAR)
+        self._palette_channel(x, y, color, P.CH_FLASH, "flash")
 
-    # -- double buffering ---------------------------------------------------
-    def double_buffer(self) -> "DoubleBuffer":
-        """Return a context manager for flicker-free scene swaps.
+    def pulse(self, x: int, y: int, color) -> None:
+        """Pulse ``color`` (palette only). Stop with :meth:`set`/:meth:`off`."""
+        self._palette_channel(x, y, color, P.CH_PULSE, "pulse")
 
-        ::
+    # -- bulk ---------------------------------------------------------------
+    def clear(self) -> None:
+        """Turn every LED off in a single message."""
+        self._send(P.set_all_msg(0))
 
-            with lp.double_buffer() as db:
-                db.draw(scene_a)   # invisible
-                db.swap()          # appears instantly
-                db.draw(scene_b)
-                db.swap()
+    def fill(self, color) -> None:
+        """Light the whole surface one colour."""
+        color = parse_color(color)
+        if color.is_rgb:
+            quads = [(L.xy_to_midi(x, y)[1], *color.rgb) for x, y in L.all_coords()]
+            self._send(P.set_leds_rgb_msg(quads))
+        else:
+            self._send(P.set_all_msg(color.velocity()))
+
+    def set_column(self, x: int, color) -> None:
+        """Light a whole column one palette colour (x 0..8; 8 = scene buttons)."""
+        c = parse_color(color)
+        self._send(P.set_column_msg(L.column_index(x), c.velocity()))
+
+    def set_row(self, y: int, color) -> None:
+        """Light a whole row one palette colour (y 0 = top buttons .. 8 = bottom)."""
+        c = parse_color(color)
+        self._send(P.set_row_msg(L.row_index(y), c.velocity()))
+
+    def render(self, grid: Mapping[tuple[int, int], object]) -> None:
+        """Paint the whole surface from a ``{(x, y): color}`` mapping.
+
+        Palette and RGB cells are batched into (at most) one SysEx message each,
+        so a full 80-LED refresh is one or two messages. Missing cells are left
+        untouched -- call :meth:`clear` first for a clean repaint.
         """
-        return DoubleBuffer(self)
+        pairs: list[tuple[int, int]] = []
+        quads: list[tuple[int, int, int, int]] = []
+        for (x, y), c in grid.items():
+            c = parse_color(c)
+            _, number = L.xy_to_midi(x, y)
+            if c.is_rgb:
+                quads.append((number, *c.rgb))
+            else:
+                pairs.append((number, c.velocity()))
+        for chunk in _chunks(pairs, 80):
+            self._send(P.set_leds_msg(chunk))
+        for chunk in _chunks(quads, 80):
+            self._send(P.set_leds_rgb_msg(chunk))
 
-    # -- text (S / Mini only) ----------------------------------------------
-    def scroll_text(self, text: str, color=Color(0, 3), loop: bool = False) -> None:
-        """Scroll text across the pads. **Launchpad S/Mini only** (original ignores)."""
-        self._send(P.text_scroll_msg(text, parse_color(color).velocity(FLAG_COPY), loop))
+    # -- text ---------------------------------------------------------------
+    def scroll_text(self, text: str, color=Color(index=21), loop: bool = False) -> None:
+        """Scroll ``text`` across the pads (palette colour). Embed bytes 1..7 for speed."""
+        self._send(P.scroll_text_msg(text, parse_color(color).velocity(), loop))
 
     def stop_text(self) -> None:
-        self._send(P.text_stop_msg())
+        self._send(P.scroll_stop_msg())
 
     # -- identity -----------------------------------------------------------
-    def identify(self, timeout: float = 0.4) -> dict:
-        """Probe the device. An S/Mini answers a device inquiry; the original
-        stays silent, which is itself the tell.
-
-        Returns a dict like ``{"model": "Launchpad S", "responds": True, ...}``.
-        """
-        self.identity = {"model": "original Launchpad (or no MIDI input)",
-                         "responds": False, "raw": None}
+    def identify(self, timeout: float = 0.5) -> dict:
+        """Probe the device with a MIDI device inquiry and parse the reply."""
+        self.identity = {"model": "unknown", "responds": False,
+                         "firmware": None, "raw": None}
         if not self._in:
             return self.identity
         self._inquiry_event.clear()
         self._inquiry_data = None
         self._send(P.device_inquiry_msg())
         if self._inquiry_event.wait(timeout) and self._inquiry_data:
-            data = self._inquiry_data
-            model = "Launchpad S / Mini (class-compliant)"
-            self.identity = {"model": model, "responds": True, "raw": data}
+            data = self._inquiry_data  # excludes F0/F7
+            # reply: 7E <id> 06 02 00 20 29 69 00 00 00 <fw0..3>
+            is_mk2 = list(data[4:8]) == [0x00, 0x20, 0x29, 0x69]
+            fw = list(data[-4:]) if len(data) >= 4 else None
+            self.identity = {"model": "Launchpad MK2" if is_mk2 else "unknown Launchpad",
+                             "responds": True, "firmware": fw, "raw": data}
         return self.identity
 
     # -- events -------------------------------------------------------------
@@ -286,7 +278,6 @@ class Launchpad:
         return handler
 
     def on_press(self, x: int, y: int) -> Callable[[Handler], Handler]:
-        """Decorator: run the handler when (x, y) is pressed."""
         return self._register(x, y, "press")
 
     def on_release(self, x: int, y: int) -> Callable[[Handler], Handler]:
@@ -302,7 +293,6 @@ class Launchpad:
         return deco
 
     def _dispatch(self, msg: "mido.Message") -> None:
-        # device-inquiry reply (S/Mini): capture and signal identify()
         if msg.type == "sysex":
             self._inquiry_data = list(msg.data)
             self._inquiry_event.set()
@@ -327,17 +317,14 @@ class Launchpad:
         if msg.type == "control_change":
             xy = L.midi_to_xy("cc", msg.control)
             if xy is None:
-                return None  # ignore config CCs echoed back
+                return None
             return ButtonEvent(xy[0], xy[1], msg.value > 0, msg.value, "cc", msg.control)
         return None
 
     def run(self, poll: float = 0.05) -> None:
         """Block forever, dispatching events, until Ctrl-C."""
         if not self._in:
-            raise RuntimeError(
-                "No MIDI input port; cannot receive button events. "
-                "(The original Launchpad needs Novation's USB driver to expose one.)"
-            )
+            raise RuntimeError("No MIDI input port; cannot receive button events.")
         try:
             while True:
                 time.sleep(poll)
@@ -345,31 +332,6 @@ class Launchpad:
             pass
 
 
-class DoubleBuffer:
-    """Helper for :meth:`Launchpad.double_buffer`. Tracks which buffer is hidden."""
-
-    def __init__(self, lp: Launchpad):
-        self.lp = lp
-        self._write_to_1 = True  # next draw goes to buffer 1 (hidden)
-
-    def __enter__(self) -> "DoubleBuffer":
-        # display buffer 0, write to buffer 1 (hidden)
-        self.lp._send(P.buffer_msg(P.BUF_DISPLAY0_WRITE1))
-        return self
-
-    def draw(self, grid: Mapping[tuple[int, int], object]) -> None:
-        """Draw a ``{(x, y): color}`` mapping into the *hidden* buffer."""
-        from .color import FLAG_IGNORE
-        for (x, y), c in grid.items():
-            self.lp.set(x, y, c, flag=FLAG_IGNORE)
-
-    def swap(self) -> None:
-        """Reveal the hidden buffer instantly and start drawing the other."""
-        if self._write_to_1:
-            self.lp._send(P.buffer_msg(P.BUF_DISPLAY1_WRITE0))
-        else:
-            self.lp._send(P.buffer_msg(P.BUF_DISPLAY0_WRITE1))
-        self._write_to_1 = not self._write_to_1
-
-    def __exit__(self, *exc) -> None:
-        self.lp._send(P.buffer_msg(P.BUF_SIMPLE))
+def _chunks(seq, n):
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]

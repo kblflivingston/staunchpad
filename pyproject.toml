@@ -8,16 +8,39 @@ version = "0.1.0"
 description = "A programming interface for the legacy Novation Launchpad (original / S / Mini)."
 readme = "README.md"
 requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jake Livingston" }]
+keywords = ["launchpad", "novation", "midi", "controller", "led", "grid", "music"]
 dependencies = [
     "mido>=1.3",
     "python-rtmidi>=1.5",
 ]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: MIDI",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/jakelivingston/launchpad-controller"
+Repository = "https://github.com/jakelivingston/launchpad-controller"
+Issues = "https://github.com/jakelivingston/launchpad-controller/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 
+[project.scripts]
+launchpad-detect = "launchpad.cli:main"
+
 [tool.setuptools]
 packages = ["launchpad"]
+
+[tool.setuptools.package-data]
+launchpad = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

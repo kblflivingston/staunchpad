@@ -1,95 +1,110 @@
-"""Colour model for the legacy Launchpad.
+"""Colour model for the Launchpad MK2.
 
-The legacy Launchpad has **no RGB**. Each LED is one red element and one green
-element, each with four brightness levels (0..3). The colour you want is packed
-into the *velocity* byte of a note (or the *value* byte of a CC):
+The MK2 lights LEDs two ways (PRM p.5, p.11-12):
 
-    velocity = (green << 4) | red | flags
+* **Palette** — a velocity/value byte 0..127 picks one of 128 preset colours
+  (0 = off). One MIDI message per LED; this is also the only mode that supports
+  hardware **flashing** and **pulsing**.
+* **RGB** — a SysEx message gives explicit red/green/blue, each 0..63, for any
+  of ~262 000 colours. Exact, but cannot flash/pulse and is SysEx-only.
 
-``red`` occupies bits 0-1, ``green`` bits 4-5. Bits 2-3 are double-buffer
-"flags" that decide what happens to the off-screen buffer (used for flashing and
-flicker-free scene swaps). See PRM pp.12-16.
-
-On the *original* Launchpad the usable palette is essentially red / amber /
-green plus a couple of orange/yellow shades; on the S the separation is cleaner.
+A :class:`Color` is either a palette index *or* an RGB triple. Build them with
+:func:`palette` / :func:`rgb`, or just pass an ``int`` (palette), ``"name"``,
+``"#rrggbb"``, or ``[r, g, b]`` anywhere a colour is expected.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Double-buffer flag bits packed into the colour byte (PRM p.16).
-FLAG_IGNORE = 0x00  # touch only the currently-addressed buffer
-FLAG_CLEAR = 0x08   # set this buffer, clear the other -> flashes in flash mode
-FLAG_COPY = 0x0C    # write to *both* buffers; the safe default (matches PRM fig.4)
-
 
 @dataclass(frozen=True)
 class Color:
-    """A Launchpad colour: ``red`` and ``green`` each 0..3."""
+    """A palette colour (``index``) or an RGB colour (``rgb``). Exactly one."""
 
-    red: int = 0
-    green: int = 0
+    index: int | None = None
+    rgb: tuple[int, int, int] | None = None
 
     def __post_init__(self) -> None:
-        if not 0 <= self.red <= 3 or not 0 <= self.green <= 3:
-            raise ValueError(f"red/green must be 0..3, got {self.red},{self.green}")
+        if (self.index is None) == (self.rgb is None):
+            raise ValueError("Color needs exactly one of index or rgb")
+        if self.index is not None and not 0 <= self.index <= 127:
+            raise ValueError("palette index must be 0..127")
+        if self.rgb is not None:
+            if len(self.rgb) != 3 or any(not 0 <= v <= 63 for v in self.rgb):
+                raise ValueError("rgb must be three values each 0..63")
 
-    def velocity(self, flag: int = FLAG_COPY) -> int:
-        """Pack into a MIDI velocity/value byte. ``flag`` is one of ``FLAG_*``."""
-        return (self.green << 4) | self.red | flag
+    @property
+    def is_rgb(self) -> bool:
+        return self.rgb is not None
 
-    @classmethod
-    def from_velocity(cls, velocity: int) -> "Color":
-        """Recover the colour from a velocity byte, discarding the flag bits."""
-        return cls(red=velocity & 0x03, green=(velocity >> 4) & 0x03)
-
-    def scaled(self, level: float) -> "Color":
-        """Return this colour dimmed/brightened by ``level`` in 0..1 (rounded)."""
-        level = max(0.0, min(1.0, level))
-        return Color(round(self.red * level), round(self.green * level))
+    def velocity(self) -> int:
+        """The palette index for channel/CC messages. Errors for RGB colours."""
+        if self.index is None:
+            raise ValueError("RGB colours can't be sent as a velocity; use SysEx RGB")
+        return self.index
 
     def __bool__(self) -> bool:
-        return self.red > 0 or self.green > 0
+        if self.is_rgb:
+            return any(self.rgb)
+        return self.index != 0
 
 
-# --- named palette ----------------------------------------------------------
-OFF = Color(0, 0)
+def palette(index: int) -> Color:
+    """A colour from the 128-entry preset palette (0 = off)."""
+    return Color(index=index)
 
-RED = Color(3, 0)
-RED_MED = Color(2, 0)
-RED_LOW = Color(1, 0)
 
-GREEN = Color(0, 3)
-GREEN_MED = Color(0, 2)
-GREEN_LOW = Color(0, 1)
+def rgb(r: int, g: int, b: int) -> Color:
+    """An exact colour; each element 0..63."""
+    return Color(rgb=(r, g, b))
 
-AMBER = Color(3, 3)
-AMBER_LOW = Color(1, 1)
 
-ORANGE = Color(3, 1)   # red-leaning
-YELLOW = Color(2, 3)   # green-leaning
-LIME = Color(1, 3)
+# --- named palette colours (indices verified from the PRM examples) ---------
+OFF = palette(0)
+RED = palette(5)
+ORANGE = palette(9)
+YELLOW = palette(13)
+GREEN = palette(21)
+BLUE = palette(45)
+PINK = palette(53)
+PURPLE = palette(81)
+
+# --- a few exact RGB conveniences (no palette guessing) ---------------------
+WHITE = rgb(63, 63, 63)
+CYAN = rgb(0, 63, 63)
+AMBER = rgb(48, 20, 0)
+RED_DIM = rgb(16, 0, 0)
+GREEN_DIM = rgb(0, 16, 0)
+BLUE_DIM = rgb(0, 0, 16)
+AMBER_DIM = rgb(14, 5, 0)
 
 #: Name -> Color, handy for config files and the soundboard example.
 NAMED: dict[str, Color] = {
-    "off": OFF,
-    "red": RED, "red_med": RED_MED, "red_low": RED_LOW,
-    "green": GREEN, "green_med": GREEN_MED, "green_low": GREEN_LOW,
-    "amber": AMBER, "amber_low": AMBER_LOW,
-    "orange": ORANGE, "yellow": YELLOW, "lime": LIME,
+    "off": OFF, "red": RED, "orange": ORANGE, "yellow": YELLOW, "green": GREEN,
+    "blue": BLUE, "pink": PINK, "purple": PURPLE, "white": WHITE, "cyan": CYAN,
+    "amber": AMBER, "red_dim": RED_DIM, "green_dim": GREEN_DIM,
+    "blue_dim": BLUE_DIM, "amber_dim": AMBER_DIM,
 }
 
 
 def parse(value) -> Color:
-    """Coerce a name, ``[red, green]`` pair, or :class:`Color` into a Color."""
+    """Coerce a Color, palette ``int``, ``"name"``, ``"#rrggbb"``, or ``[r,g,b]``."""
     if isinstance(value, Color):
         return value
+    if isinstance(value, bool):  # guard: bool is an int subclass
+        raise ValueError("cannot interpret a bool as a colour")
+    if isinstance(value, int):
+        return palette(value)
     if isinstance(value, str):
+        s = value.strip().lower()
+        if s.startswith("#") and len(s) == 7:
+            r, g, b = (int(s[i:i + 2], 16) for i in (1, 3, 5))
+            return rgb(r >> 2, g >> 2, b >> 2)  # 0..255 -> 0..63
         try:
-            return NAMED[value.lower()]
+            return NAMED[s]
         except KeyError:
             raise ValueError(f"unknown colour name: {value!r}")
-    if isinstance(value, (list, tuple)) and len(value) == 2:
-        return Color(int(value[0]), int(value[1]))
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        return rgb(int(value[0]), int(value[1]), int(value[2]))
     raise ValueError(f"cannot interpret {value!r} as a colour")

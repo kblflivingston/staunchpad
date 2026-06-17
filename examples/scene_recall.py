@@ -33,11 +33,11 @@ def main():
     global save_armed
     lp = Launchpad()
     lp.reset()
-    lp.set(0, 0, color.AMBER_LOW)  # the "save" toggle, dim = disarmed
+    lp.set(0, 0, color.AMBER_DIM)  # the "save" toggle, dim = disarmed
 
     # show which slots already have a saved scene
     for slot in range(8):
-        lp.set(8, slot + 1, color.GREEN_LOW if scene_path(slot).exists() else color.RED_LOW)
+        lp.set(8, slot + 1, color.GREEN_DIM if scene_path(slot).exists() else color.RED_DIM)
 
     @lp.on
     def handle(ev: ButtonEvent):
@@ -48,7 +48,7 @@ def main():
         # save-arm toggle
         if ev.pos == (0, 0):
             save_armed = not save_armed
-            lp.set(0, 0, color.AMBER if save_armed else color.AMBER_LOW)
+            lp.set(0, 0, color.AMBER if save_armed else color.AMBER_DIM)
             return
 
         # scene buttons (right column)
@@ -56,16 +56,16 @@ def main():
             slot = ev.y - 1
             if save_armed:
                 scenes.save(scene_path(slot), grid)
-                lp.set(8, ev.y, color.GREEN_LOW)
+                lp.set(8, ev.y, color.GREEN_DIM)
                 print(f"saved slot {slot}")
             elif scene_path(slot).exists():
                 loaded = scenes.load(scene_path(slot))
                 grid.clear()
                 grid.update(loaded)
                 lp.render(grid)
-                lp.set(0, 0, color.AMBER if save_armed else color.AMBER_LOW)
+                lp.set(0, 0, color.AMBER if save_armed else color.AMBER_DIM)
                 for s in range(8):
-                    lp.set(8, s + 1, color.GREEN_LOW if scene_path(s).exists() else color.RED_LOW)
+                    lp.set(8, s + 1, color.GREEN_DIM if scene_path(s).exists() else color.RED_DIM)
                 print(f"recalled slot {slot}")
             return
 

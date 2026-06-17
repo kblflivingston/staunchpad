@@ -1,4 +1,4 @@
-"""A little light show that exercises most LED features.
+"""A light show that exercises most MK2 LED features (RGB, pulse, flash, text).
 
     .venv/bin/python examples/hello_lights.py
 """
@@ -8,54 +8,42 @@ import time
 from launchpad import Launchpad, color
 
 
-def sweep(lp):
-    """Walk a colour gradient across the grid, row by row."""
-    palette = [color.RED, color.ORANGE, color.AMBER, color.YELLOW,
-               color.LIME, color.GREEN]
-    for y in range(1, 9):
-        for x in range(8):
-            lp.set(x, y, palette[(x + y) % len(palette)])
-            time.sleep(0.01)
-
-
-def full_refresh_animation(lp):
-    """Use the fast rapid-update path to animate full-surface frames."""
-    for frame in range(8):
+def rgb_sweep(lp):
+    """Walk a smooth RGB hue gradient across the grid using one SysEx per frame."""
+    for t in range(48):
         grid = {}
         for y in range(1, 9):
             for x in range(8):
-                ring = (abs(x - 3.5) + abs(y - 4.5))
-                on = int(ring) % 8 == frame % 8
-                grid[(x, y)] = color.GREEN if on else color.OFF
+                phase = (x + y + t) % 24
+                r = max(0, 31 - abs(phase - 6) * 6)
+                g = max(0, 31 - abs(phase - 14) * 6)
+                b = max(0, 31 - abs(phase - 22) * 6)
+                grid[(x, y)] = color.rgb(min(63, r), min(63, g), min(63, b))
         lp.render(grid)
-        time.sleep(0.08)
+        time.sleep(0.04)
 
 
-def flashing_demo(lp):
-    lp.reset()
-    lp.begin_flash()
+def pulse_and_flash(lp):
+    lp.clear()
     for x in range(8):
-        lp.set(x, 4, color.AMBER)            # solid row
-        lp.flash(x, 5, color.RED)            # flashing row
-    time.sleep(3)
-    lp.end_flash()
+        lp.pulse(x, 3, color.GREEN)     # whole row pulses green
+        lp.set(x, 5, color.BLUE)        # static base...
+        lp.flash(x, 5, color.RED)       # ...flashing to red
+    time.sleep(4)
+    lp.clear()
 
 
 def main():
     with Launchpad() as lp:
         info = lp.identify()
-        print("Device:", info["model"])
+        print("Device:", info["model"], "| firmware:", info["firmware"])
 
-        sweep(lp)
-        time.sleep(0.5)
-        full_refresh_animation(lp)
-        flashing_demo(lp)
+        rgb_sweep(lp)
+        pulse_and_flash(lp)
 
-        if info["responds"]:  # S / Mini only
-            lp.scroll_text("hello", color.GREEN, loop=False)
-            time.sleep(3)
-
-        lp.reset()
+        lp.scroll_text("hello", color.GREEN, loop=False)
+        time.sleep(3.5)
+        lp.clear()
 
 
 if __name__ == "__main__":

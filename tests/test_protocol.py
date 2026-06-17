@@ -1,52 +1,70 @@
+import pytest
+
 from launchpad import protocol as P
-from launchpad.color import AMBER, RED
+
+H = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x18]   # MK2 SysEx header
+END = 0xF7
 
 
-def test_basic_commands():
-    assert P.reset_msg() == [0xB0, 0x00, 0x00]
-    assert P.layout_msg(P.LAYOUT_XY) == [0xB0, 0x00, 0x01]
-    assert P.layout_msg(P.LAYOUT_DRUM) == [0xB0, 0x00, 0x02]
-    assert P.all_leds_on_msg(0) == [0xB0, 0x00, 0x7D]
-    assert P.all_leds_on_msg(2) == [0xB0, 0x00, 0x7F]
+def test_sysex_framing():
+    assert P.sysex(0x0E, 0x00) == H + [0x0E, 0x00, END]
 
 
-def test_brightness_examples_from_prm():
-    # Pre-baked examples in the PRM (p.11).
-    assert P.brightness_msg(1, 16) == [0xB0, 0x1E, 0x0D]
-    assert P.brightness_msg(1, 11) == [0xB0, 0x1E, 0x08]
-    assert P.brightness_msg(1, 7) == [0xB0, 0x1E, 0x04]
-    assert P.brightness_msg(1, 5) == [0xB0, 0x1E, 0x02]   # default
-    assert P.brightness_msg(1, 3) == [0xB0, 0x1E, 0x00]
+def test_layout_and_clear():
+    assert P.layout_msg(P.LAYOUT_SESSION) == H + [0x22, 0x00, END]
+    assert P.set_all_msg(0) == H + [0x0E, 0x00, END]
 
 
-def test_led_messages():
-    # PRM example: light second-from-bottom-left grid LED red -> 90 60 0F.
-    assert P.led_note_msg(0x60, RED.velocity()) == [0x90, 0x60, 0x0F]
-    assert P.led_cc_msg(0x6A, 0x3C) == [0xB0, 0x6A, 0x3C]
+def test_channel_messages_static_flash_pulse():
+    # PRM: light top-left grid LED blue -> 90 51 2D (note 81, palette 45, ch1).
+    assert P.note_msg(81, 45, P.CH_STATIC) == [0x90, 81, 45]
+    # PRM: flash bottom-left between red and current -> 91 0B 05 (ch2).
+    assert P.note_msg(11, 5, P.CH_FLASH) == [0x91, 11, 5]
+    # PRM: pulse top-right purple -> 92 58 51 (note 88, palette 81, ch3).
+    assert P.note_msg(88, 81, P.CH_PULSE) == [0x92, 88, 81]
+    # PRM: light cursor-left LED pink -> B0 6A 35 (CC 106, palette 53).
+    assert P.cc_msg(106, 53, P.CH_STATIC) == [0xB0, 106, 53]
 
 
-def test_rapid_pairs():
-    vels = list(range(80))
-    msgs = P.rapid_msgs(vels)
-    assert len(msgs) == 40
-    assert msgs[0] == [0x92, 0, 1]
-    assert msgs[-1] == [0x92, 78, 79]
+def test_set_led_sysex_palette_and_rgb():
+    assert P.set_led_msg(81, 45) == H + [0x0A, 81, 45, END]
+    assert P.set_led_rgb_msg(81, 0, 0, 63) == H + [0x0B, 81, 0, 0, 63, END]
 
 
-def test_rapid_pairs_rejects_odd():
-    try:
-        P.rapid_msgs([1, 2, 3])
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("odd-length rapid update should raise")
+def test_set_many_leds_one_message():
+    msg = P.set_leds_msg([(11, 5), (12, 9), (13, 13)])
+    assert msg == H + [0x0A, 11, 5, 12, 9, 13, 13, END]
+    assert len(P.set_leds_rgb_msg([(11, 1, 2, 3)])) == len(H) + 1 + 4 + 1
 
 
-def test_text_scroll_sysex():
-    # PRM "Hello world" header bytes: F0 00 20 29 09 <colour> ...
-    msg = P.text_scroll_msg("Hi", AMBER.velocity(), loop=True)
-    assert msg[:5] == [0xF0, 0x00, 0x20, 0x29, 0x09]
-    assert msg[5] == AMBER.velocity() | P.TEXT_LOOP_BIT
-    assert msg[6:8] == [ord("H"), ord("i")]
-    assert msg[-1] == 0xF7
-    assert P.text_stop_msg() == [0xF0, 0x00, 0x20, 0x29, 0x09, 0x00, 0xF7]
+def test_set_leds_limits():
+    with pytest.raises(ValueError):
+        P.set_leds_msg([(0, 0)] * 81)
+    with pytest.raises(ValueError):
+        P.set_led_rgb_msg(11, 64, 0, 0)   # element out of range
+
+
+def test_column_row_all():
+    assert P.set_column_msg(0, 5) == H + [0x0C, 0, 5, END]
+    assert P.set_row_msg(8, 5) == H + [0x0D, 8, 5, END]
+    with pytest.raises(ValueError):
+        P.set_column_msg(9, 5)
+
+
+def test_flash_pulse_sysex_have_unused_mode_byte():
+    assert P.flash_led_sysex(11, 5) == H + [0x23, 0x00, 11, 5, END]
+    assert P.pulse_led_sysex(88, 81) == H + [0x28, 0x00, 88, 81, END]
+
+
+def test_text_scroll():
+    # PRM "Hello world" header: 14 <colour> <loop> <text...>
+    msg = P.scroll_text_msg("Hi", 124, loop=True)
+    assert msg[:6] == H
+    assert msg[6:9] == [0x14, 124, 1]
+    assert msg[9:11] == [ord("H"), ord("i")]
+    assert msg[-1] == END
+    assert P.scroll_stop_msg() == H + [0x14, END]
+
+
+def test_device_inquiry():
+    assert P.device_inquiry_msg() == [0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7]

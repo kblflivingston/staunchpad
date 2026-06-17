@@ -1,46 +1,50 @@
+import pytest
+
 from launchpad import color
-from launchpad.color import Color, FLAG_COPY, FLAG_CLEAR, FLAG_IGNORE
+from launchpad.color import Color, palette, rgb
 
 
-def test_palette_velocities_match_novation_reference():
-    # Values straight out of the Launchpad S PRM (copy mode, +0x0C).
-    assert color.RED.velocity() == 0x0F     # 15
-    assert color.GREEN.velocity() == 0x3C   # 60
-    assert color.AMBER.velocity() == 0x3F   # 63
-    assert color.OFF.velocity() == 0x0C     # 12 (copy-mode "off")
+def test_named_palette_indices_match_prm_examples():
+    # Indices taken straight from the Launchpad MK2 PRM worked examples.
+    assert color.RED.index == 5
+    assert color.ORANGE.index == 9
+    assert color.YELLOW.index == 13
+    assert color.GREEN.index == 21
+    assert color.BLUE.index == 45
+    assert color.PINK.index == 53
+    assert color.PURPLE.index == 81
+    assert color.OFF.index == 0
 
 
-def test_flag_arithmetic():
-    # PRM: flashing = copy value minus 4 (clear bit 2); ignore = minus 12.
-    assert color.AMBER.velocity(FLAG_COPY) == 63
-    assert color.AMBER.velocity(FLAG_CLEAR) == 59
-    assert color.AMBER.velocity(FLAG_IGNORE) == 51
+def test_palette_velocity():
+    assert palette(45).velocity() == 45
+    assert not palette(0)          # off is falsy
+    assert palette(5)
 
 
-def test_velocity_round_trip():
-    for r in range(4):
-        for g in range(4):
-            v = Color(r, g).velocity()
-            assert Color.from_velocity(v) == Color(r, g)
+def test_rgb_mode():
+    c = rgb(63, 0, 0)
+    assert c.is_rgb and c.rgb == (63, 0, 0)
+    with pytest.raises(ValueError):
+        c.velocity()               # RGB has no palette velocity
 
 
-def test_bounds():
-    for bad in [(-1, 0), (4, 0), (0, 9)]:
-        try:
-            Color(*bad)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"Color{bad} should have raised")
+def test_validation():
+    with pytest.raises(ValueError):
+        Color()                    # neither index nor rgb
+    with pytest.raises(ValueError):
+        Color(index=5, rgb=(1, 1, 1))   # both
+    with pytest.raises(ValueError):
+        palette(200)               # index out of range
+    with pytest.raises(ValueError):
+        rgb(64, 0, 0)              # element out of range
 
 
 def test_parse():
     assert color.parse("red") is color.RED
-    assert color.parse([3, 3]) == color.AMBER
+    assert color.parse(45) == palette(45)
+    assert color.parse([63, 0, 0]) == rgb(63, 0, 0)
     assert color.parse(color.GREEN) is color.GREEN
-
-
-def test_scaled_and_bool():
-    assert color.RED.scaled(0) == color.OFF
-    assert not color.OFF
-    assert color.RED
+    assert color.parse("#ff0000") == rgb(63, 0, 0)   # 255>>2 == 63
+    with pytest.raises(ValueError):
+        color.parse(True)          # bool guarded

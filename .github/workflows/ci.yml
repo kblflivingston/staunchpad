@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ALSA headers (for python-rtmidi)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test
+        run: pytest -q

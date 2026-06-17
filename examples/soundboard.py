@@ -24,13 +24,13 @@ BINDINGS = {
 
 
 def run_command(lp: Launchpad, x: int, y: int, cmd: str):
-    lp.flash(x, y, color.AMBER)
+    lp.pulse(x, y, color.GREEN)          # pulse while the command runs
     try:
         subprocess.run(cmd, shell=True, check=True)
         ok = True
     except subprocess.CalledProcessError:
         ok = False
-    lp.end_flash()
+    # a channel-1 (static) message stops the pulse
     lp.set(x, y, BINDINGS[(x, y)][0] if ok else color.RED)
 
 
