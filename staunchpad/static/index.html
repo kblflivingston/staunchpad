@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>staunchpad</title>
+<style>
+  :root { --bg:#0b0c10; --panel:#15171f; --line:#262a36; --ink:#e7e9f0; --mut:#8a90a2; --acc:#4db4ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; letter-spacing:.04em; }
+  header .tag { color:var(--mut); font-size:12px; }
+  header .dot { width:9px; height:9px; border-radius:50%; background:#c8413b; display:inline-block; margin-right:6px;}
+  header .dot.on { background:#3ad17a; }
+  main { display:grid; grid-template-columns:auto 320px; gap:24px; padding:24px; align-items:start; }
+  .modes { margin-left:auto; display:flex; gap:6px; }
+  .modes button { background:#1d2030; color:var(--mut); border:1px solid var(--line);
+                  padding:6px 12px; border-radius:8px; cursor:pointer; }
+  .modes button.active { color:#fff; border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+
+  /* grid */
+  .surface { background:#070809; padding:16px; border-radius:16px; border:1px solid var(--line);
+             box-shadow:inset 0 0 40px #000; }
+  .grid { display:grid; grid-template-columns:repeat(9, 56px); grid-template-rows:repeat(9, 56px); gap:8px;
+          user-select:none; -webkit-user-select:none; }
+  .pad { border-radius:10px; background:#0c0c10; border:1px solid #1c1f29; cursor:pointer;
+         transition:background .12s, box-shadow .12s; position:relative; }
+  .pad.round { border-radius:50%; }
+  .pad.empty { visibility:hidden; }
+  .pad.sel { outline:2px solid var(--acc); outline-offset:2px; }
+  .pad.anim::after { content:""; position:absolute; inset:auto 5px 5px auto; width:7px;height:7px;
+                     border-radius:50%; background:#fff; opacity:.5; }
+  .pad .lbl { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+              font-size:9px; color:#000; mix-blend-mode:overlay; text-align:center; padding:2px;
+              overflow:hidden; }
+  .pad.running { animation:pulse 1.1s ease-in-out infinite; }
+  .pad.error   { animation:flash .4s steps(1) infinite; }
+  @keyframes pulse { 0%,100%{ filter:brightness(.5);} 50%{ filter:brightness(1.4);} }
+  @keyframes flash { 0%{ filter:brightness(1.5);} 50%{ filter:brightness(.2);} }
+
+  /* panel */
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .panel h2 { font-size:13px; margin:0 0 12px; color:var(--mut); text-transform:uppercase; letter-spacing:.08em;}
+  label { display:block; font-size:12px; color:var(--mut); margin:10px 0 4px; }
+  input[type=text], textarea, select { width:100%; background:#0e1018; color:var(--ink);
+        border:1px solid var(--line); border-radius:8px; padding:8px; font:inherit; }
+  textarea { resize:vertical; min-height:64px; }
+  .row { display:flex; gap:10px; align-items:center; }
+  .row > * { flex:1; }
+  input[type=color] { width:100%; height:34px; background:#0e1018; border:1px solid var(--line); border-radius:8px; }
+  input[type=range] { width:100%; }
+  .btns { display:flex; gap:8px; margin-top:14px; }
+  button.act { background:var(--acc); color:#04121c; border:none; padding:9px 12px; border-radius:9px;
+               font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--mut); border:1px solid var(--line);
+                 padding:9px 12px; border-radius:9px; cursor:pointer; }
+  .hint { color:var(--mut); font-size:12px; margin-top:8px; }
+  .anim-list { margin-top:8px; }
+  .anim-row { display:flex; gap:8px; align-items:center; padding:6px; border:1px solid var(--line);
+              border-radius:8px; margin-bottom:6px; }
+  .anim-row.active { border-color:var(--acc); }
+  .anim-row select { flex:1; }
+  .swatch { width:18px;height:18px;border-radius:4px;border:1px solid #0006;}
+</style>
+</head>
+<body>
+<header>
+  <h1>staunchpad</h1>
+  <span class="tag"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
+  <span class="tag" id="mode-hint"></span>
+  <div class="modes">
+    <button data-mode="run" class="active">Run</button>
+    <button data-mode="edit">Edit</button>
+    <button data-mode="paint">Paint</button>
+  </div>
+</header>
+
+<main>
+  <div class="surface"><div class="grid" id="grid"></div></div>
+
+  <div>
+    <!-- BUTTON EDITOR -->
+    <div class="panel" id="editor" style="display:none">
+      <h2>Button <span id="ed-pos"></span></h2>
+      <label>Type</label>
+      <select id="ed-type">
+        <option value="prompt">Prompt (signals your agent)</option>
+        <option value="shell">Shell command</option>
+        <option value="none">Plain (no action)</option>
+        <option value="clear">— clear this button —</option>
+      </select>
+      <div id="ed-prompt-wrap">
+        <label>Prompt</label>
+        <textarea id="ed-prompt" placeholder="Summarise today's commits…"></textarea>
+      </div>
+      <div id="ed-cmd-wrap" style="display:none">
+        <label>Shell command</label>
+        <input type="text" id="ed-cmd" placeholder="say hello">
+      </div>
+      <label>Label (shown on the pad)</label>
+      <input type="text" id="ed-label" placeholder="standup">
+      <label>Idle colour</label>
+      <div class="row">
+        <input type="color" id="ed-color" value="#0a4a6e">
+        <div><label style="margin:0">Brightness</label>
+             <input type="range" id="ed-dim" min="0.1" max="1" step="0.05" value="0.7"></div>
+      </div>
+      <div class="row">
+        <div><label>Pressed</label><input type="color" id="ed-pressed" value="#ffffff"></div>
+        <div><label>Complete</label><input type="color" id="ed-complete" value="#23e07a"></div>
+      </div>
+      <div class="row">
+        <div><label>Running (pulse)</label>
+          <select id="ed-running"><option>orange</option><option>yellow</option><option>blue</option><option>purple</option><option>pink</option><option>green</option></select></div>
+        <div><label>Error (flash)</label>
+          <select id="ed-error"><option>red</option><option>orange</option><option>pink</option></select></div>
+      </div>
+      <div class="btns">
+        <button class="act" id="ed-apply">Apply</button>
+        <button class="ghost" id="ed-press">Test press</button>
+      </div>
+    </div>
+
+    <!-- ANIMATIONS -->
+    <div class="panel" style="margin-top:16px">
+      <h2>Animations</h2>
+      <div class="anim-list" id="anim-list"></div>
+      <button class="ghost" id="anim-add">+ add animation</button>
+      <div class="hint">In <b>Paint</b> mode, click the highlighted animation, then click pads to add/remove them from its region.</div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <div class="hint" id="global-hint">
+        <b>Run</b>: click a pad to fire it. <b>Edit</b>: click a pad to program it.
+        <b>Paint</b>: click pads to build an animation region. Everything saves automatically.
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const VALID = (x,y) => (y===0 ? x>=0&&x<=7 : (y>=1&&y<=8 && x>=0&&x<=8));
+let config = {buttons:[], animations:[]};
+let mode = "run";
+let sel = null;            // selected [x,y] in edit mode
+let activeAnim = null;     // index into config.animations being painted
+
+const $ = s => document.querySelector(s);
+const key = (x,y) => x+","+y;
+
+// ---------- build grid ----------
+const grid = $("#grid");
+for (let y=0;y<9;y++) for (let x=0;x<9;x++){
+  const pad = document.createElement("div");
+  pad.className = "pad" + ((y===0||x===8)?" round":"") + (VALID(x,y)?"":" empty");
+  pad.style.gridColumn = x+1; pad.style.gridRow = y+1;
+  pad.dataset.x=x; pad.dataset.y=y;
+  if (VALID(x,y)){
+    pad.addEventListener("click", ()=>onPad(x,y));
+    pad.addEventListener("mousedown", e=>onPadDown(e,x,y));
+    pad.addEventListener("mouseenter", ()=>onPadEnter(x,y));
+  }
+  const lbl = document.createElement("div"); lbl.className="lbl"; pad.appendChild(lbl);
+  grid.appendChild(pad);
+}
+const padEl = (x,y) => grid.querySelector(`.pad[data-x="${x}"][data-y="${y}"]`);
+
+// ---------- modes ----------
+document.querySelectorAll(".modes button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    mode=b.dataset.mode;
+    document.querySelectorAll(".modes button").forEach(x=>x.classList.toggle("active",x===b));
+    $("#editor").style.display = (mode==="edit" && sel)?"block":"none";
+    renderAnimList();
+  });
+});
+
+// ---------- pad interaction ----------
+// click handles Run (fire) and Edit (select); Paint uses press-drag below.
+function onPad(x,y){
+  if (mode==="run"){ post("/api/press",{x,y}); flashPad(x,y); }
+  else if (mode==="edit"){ selectPad(x,y); }
+}
+function flashPad(x,y){ const p=padEl(x,y); p.classList.add("sel"); setTimeout(()=>p.classList.remove("sel"),150); }
+
+// drag-to-paint an animation region: toggle on press, drag to add more,
+// each cell at most once per stroke, and save just once when the stroke ends.
+let painting=false, strokeSeen=new Set();
+function onPadDown(e,x,y){
+  if (mode!=="paint") return;
+  e.preventDefault();
+  painting=true; strokeSeen=new Set(); paintCell(x,y);
+}
+function onPadEnter(x,y){ if (mode==="paint" && painting) paintCell(x,y); }
+document.addEventListener("mouseup", ()=>{ if(painting){ painting=false; commitConfig(); } });
+function paintCell(x,y){
+  const k=key(x,y); if (strokeSeen.has(k)) return; strokeSeen.add(k);
+  if (activeAnim==null){ if(config.animations.length===0) $("#anim-add").click(); activeAnim=0; }
+  const a=config.animations[activeAnim]; a.cells=a.cells||[];
+  const i=a.cells.findIndex(c=>c[0]===x&&c[1]===y);
+  if (i>=0) a.cells.splice(i,1); else a.cells.push([x,y]);
+  markAnimCells(); renderAnimList();             // visual only; save on mouseup
+}
+
+// ---------- editor ----------
+function findBtn(x,y){ return config.buttons.find(b=>b.x===x&&b.y===y); }
+function selectPad(x,y){
+  sel=[x,y];
+  grid.querySelectorAll(".pad.sel").forEach(p=>p.classList.remove("sel"));
+  padEl(x,y).classList.add("sel");
+  const b = findBtn(x,y) || {};
+  $("#ed-pos").textContent = `(${x}, ${y})`;
+  $("#ed-type").value = b.type || "prompt";
+  $("#ed-prompt").value = b.prompt || "";
+  $("#ed-cmd").value = b.command || "";
+  $("#ed-label").value = b.label || "";
+  $("#ed-color").value = b.color || "#0a4a6e";
+  $("#ed-dim").value = b.dim ?? 0.7;
+  $("#ed-pressed").value = b.pressed?.startsWith("#") ? b.pressed : "#ffffff";
+  $("#ed-complete").value = b.complete?.startsWith("#") ? b.complete : "#23e07a";
+  $("#ed-running").value = b.running || "orange";
+  $("#ed-error").value = b.error || "red";
+  syncTypeFields();
+  $("#editor").style.display="block";
+}
+$("#ed-type").addEventListener("change", syncTypeFields);
+function syncTypeFields(){
+  const t=$("#ed-type").value;
+  $("#ed-prompt-wrap").style.display = t==="prompt"?"block":"none";
+  $("#ed-cmd-wrap").style.display = t==="shell"?"block":"none";
+}
+$("#ed-apply").addEventListener("click", ()=>{
+  if(!sel) return;
+  const [x,y]=sel;
+  config.buttons = config.buttons.filter(b=>!(b.x===x&&b.y===y));
+  const t=$("#ed-type").value;
+  if(t!=="clear"){
+    config.buttons.push({x,y,type:t,
+      prompt:$("#ed-prompt").value, command:$("#ed-cmd").value,
+      label:$("#ed-label").value,
+      color:$("#ed-color").value, dim:parseFloat($("#ed-dim").value),
+      pressed:$("#ed-pressed").value, complete:$("#ed-complete").value,
+      running:$("#ed-running").value, error:$("#ed-error").value});
+  } else { $("#editor").style.display="none"; sel=null; }
+  saveConfig();
+});
+$("#ed-press").addEventListener("click", ()=>{ if(sel) post("/api/press",{x:sel[0],y:sel[1]}); });
+
+// ---------- animations ----------
+function renderAnimList(){
+  const list=$("#anim-list"); list.innerHTML="";
+  config.animations.forEach((a,i)=>{
+    const row=document.createElement("div");
+    row.className="anim-row"+(i===activeAnim&&mode==="paint"?" active":"");
+    const sw=document.createElement("div"); sw.className="swatch"; sw.style.background=a.color||"#3a86ff";
+    const sel=document.createElement("select");
+    ["twinkle","breathe","rainbow"].forEach(t=>{const o=document.createElement("option");o.textContent=t;o.selected=a.type===t;sel.appendChild(o);});
+    sel.addEventListener("change",()=>{a.type=sel.value; saveConfig();});
+    const cnt=document.createElement("span"); cnt.style.color="#8a90a2"; cnt.textContent=(a.cells?.length||0)+" cells";
+    const paint=document.createElement("button"); paint.className="ghost"; paint.textContent="paint";
+    paint.addEventListener("click",()=>{ activeAnim=i; mode="paint";
+      document.querySelectorAll(".modes button").forEach(x=>x.classList.toggle("active",x.dataset.mode==="paint"));
+      renderAnimList(); });
+    const del=document.createElement("button"); del.className="ghost"; del.textContent="✕";
+    del.addEventListener("click",()=>{ config.animations.splice(i,1); if(activeAnim===i)activeAnim=null; saveConfig(); });
+    row.append(sw,sel,cnt,paint,del); list.appendChild(row);
+  });
+}
+$("#anim-add").addEventListener("click", ()=>{
+  config.animations.push({type:"twinkle",color:"#1a90ff",cells:[]});
+  activeAnim=config.animations.length-1; saveConfig();
+});
+// ---------- server sync ----------
+async function post(path,body){ try{ await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});}catch(e){} }
+let saveTimer=null;
+function saveConfig(){ markAnimCells(); renderAnimList(); clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>post("/api/config",config),300); }    // debounced rebuild
+function commitConfig(){ clearTimeout(saveTimer); markAnimCells(); renderAnimList();
+  post("/api/config",config); }                                  // immediate (end of paint stroke)
+function markAnimCells(){
+  grid.querySelectorAll(".pad.anim").forEach(p=>p.classList.remove("anim"));
+  config.animations.forEach(a=>(a.cells||[]).forEach(([x,y])=>{const p=padEl(x,y); if(p)p.classList.add("anim");}));
+}
+async function loadConfig(){ try{ config=await (await fetch("/api/config")).json(); }catch(e){}
+  if(!config.buttons)config.buttons=[]; if(!config.animations)config.animations=[];
+  markAnimCells(); renderAnimList(); }
+
+// ---------- live state polling ----------
+async function poll(){
+  try{
+    const s = await (await fetch("/api/state")).json();
+    $("#dot").classList.toggle("on", s.connected);
+    $("#conn").textContent = s.connected ? "Launchpad MK2 connected" : "device offline (editor only)";
+    grid.querySelectorAll(".pad").forEach(p=>{
+      const k=key(+p.dataset.x,+p.dataset.y); const c=s.cells[k];
+      p.classList.remove("running","error");
+      const lbl=p.querySelector(".lbl");
+      if(c){ p.style.background=c.hex;
+        p.style.boxShadow = c.hex==="#0c0c10" ? "none" : `0 0 12px ${c.hex}aa, inset 0 0 6px #fff2`;
+        if(c.state==="running")p.classList.add("running");
+        if(c.state==="error")p.classList.add("error");
+        lbl.textContent = c.label || "";
+      } else { p.style.background="#0c0c10"; p.style.boxShadow="none"; lbl.textContent=""; }
+    });
+  }catch(e){ $("#conn").textContent="server offline"; $("#dot").classList.remove("on"); }
+}
+loadConfig();
+setInterval(poll, 200);
+poll();
+</script>
+</body>
+</html>

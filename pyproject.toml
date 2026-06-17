@@ -35,12 +35,13 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 staunchpad-detect = "staunchpad.cli:main"
+staunchpad-ui = "staunchpad.webui:main"
 
 [tool.setuptools]
 packages = ["staunchpad"]
 
 [tool.setuptools.package-data]
-staunchpad = ["py.typed"]
+staunchpad = ["py.typed", "static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

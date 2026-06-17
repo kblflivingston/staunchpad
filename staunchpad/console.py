@@ -100,6 +100,12 @@ class ActionButton(Widget):
         else:
             lp.set(self.x, self.y, c)
 
+    def display_color(self) -> Color:
+        """The colour currently representing this button (for UI mirroring)."""
+        if self.state is State.IDLE:
+            return self.idle_color
+        return self.colors.get(self.state, self.idle_color)
+
     # -- events -------------------------------------------------------------
     def handle(self, ev):
         if ev.pressed and not self._busy:
@@ -187,14 +193,16 @@ class Console(App):
         self._seen: dict[str, str] = {}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        # persistent animation clock so phase survives layout rebuilds
+        self._epoch = time.time()
 
     # -- prompt-job tracking ------------------------------------------------
     def _track(self, job_id: str, button: PromptButton) -> None:
         self._jobs[job_id] = button
         self._seen[job_id] = dispatch.PENDING
 
-    def _queue_loop(self) -> None:
-        while not self._stop.is_set():
+    def _queue_loop(self, stop: threading.Event) -> None:
+        while not stop.is_set():
             for job_id, button in list(self._jobs.items()):
                 status = self.queue.status(job_id)
                 if status and status != self._seen.get(job_id):
@@ -205,7 +213,7 @@ class Console(App):
                         self._seen.pop(job_id, None)
                         if self.archive_done:
                             self.queue.archive(job_id)
-            self._stop.wait(0.1)
+            stop.wait(0.1)
 
     # -- animations ---------------------------------------------------------
     def animate(self, animation):
@@ -213,35 +221,77 @@ class Console(App):
         self.animations.append(animation)
         return animation
 
-    def _anim_loop(self) -> None:
-        start = time.time()
-        while not self._stop.is_set():
-            t = time.time() - start
-            changed: dict[tuple[int, int], Color] = {}
-            for anim in self.animations:
-                for cell, c in anim.frame(t).items():
-                    if anim._last.get(cell) != c:
-                        anim._last[cell] = c
-                        changed[cell] = c
-            if changed:
-                self.lp.render(changed)
-            self._stop.wait(1.0 / self.fps)
+    def _anim_frame(self) -> None:
+        """Render one animation frame (diffed) using the persistent clock."""
+        t = time.time() - self._epoch
+        changed: dict[tuple[int, int], Color] = {}
+        for anim in self.animations:
+            for cell, c in anim.frame(t).items():
+                if anim._last.get(cell) != c:
+                    anim._last[cell] = c
+                    changed[cell] = c
+        if changed:
+            self.lp.render(changed)
 
-    # -- run ----------------------------------------------------------------
-    def run(self) -> None:
+    def _anim_loop(self, stop: threading.Event) -> None:
+        while not stop.is_set():
+            self._anim_frame()
+            stop.wait(1.0 / self.fps)
+
+    # -- snapshot (for live mirroring in a UI) ------------------------------
+    def snapshot(self) -> dict[tuple[int, int], Color]:
+        """Current displayed colour per painted cell (buttons + animations)."""
+        out: dict[tuple[int, int], Color] = {}
+        for w in self.widgets:
+            if isinstance(w, ActionButton):
+                out[(w.x, w.y)] = w.display_color()
+        for anim in self.animations:
+            out.update(anim._last)
+        return out
+
+    def clear_layout(self) -> None:
+        """Remove all buttons and animations (used when rebuilding from config)."""
+        self.widgets.clear()
+        self.animations.clear()
+        if self.lp.connected:
+            self.lp.clear()
+
+    # -- lifecycle ----------------------------------------------------------
+    def start(self) -> None:
+        """Paint idle, then start the queue-watcher and animation loops (non-blocking).
+
+        Always fully stops any previous loops first, so rebuilding the layout
+        (e.g. from a UI) never leaves zombie animation threads running — that
+        would multiply the apparent animation speed.
+        """
+        self.stop()
         self.lp.clear()
-        self.redraw()                          # paint every button's idle colour
-        self._stop.clear()
-        self._threads = [threading.Thread(target=self._queue_loop, daemon=True)]
-        if self.animations:
-            self._threads.append(threading.Thread(target=self._anim_loop, daemon=True))
+        self.redraw()
+        self._anim_frame()        # paint animations immediately so rebuilds don't blink
+        # a fresh event per run; each loop captures its own so swapping is race-free
+        self._stop = threading.Event()
+        self._threads = [
+            threading.Thread(target=self._queue_loop, args=(self._stop,), daemon=True),
+            threading.Thread(target=self._anim_loop, args=(self._stop,), daemon=True),
+        ]
         for th in self._threads:
             th.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        for th in self._threads:
+            th.join(timeout=1.0)
+        self._threads = []
+        if self.lp.connected:
+            self.lp.clear()
+
+    def run(self) -> None:
+        """Start the loops and block until Ctrl-C."""
+        self.start()
         try:
             self.lp.run()
         finally:
-            self._stop.set()
-            self.lp.clear()
+            self.stop()
 
 
 # --- prompt/action runner helpers (for ActionButton / manual use) -----------
