@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import animations as _anim
 from . import color as _c
-from .color import Color, rgb
+from .color import Color, palette, rgb
 from .console import ActionButton, Console, PromptButton
 from .device import ButtonEvent, LaunchpadNotFound
 from .dispatch import JobQueue
@@ -49,6 +49,20 @@ def color_to_hex(c: Color) -> str:
 def hex_to_rgb(h: str) -> Color:
     h = h.lstrip("#")
     return rgb(int(h[0:2], 16) // 4, int(h[2:4], 16) // 4, int(h[4:6], 16) // 4)
+
+
+# RGB of each known palette index, for mapping the colour-picker to the nearest
+# palette colour (hardware pulse/flash need a palette index, not RGB).
+_PAL_RGB = {i: (int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+            for i, h in PALETTE_HEX.items() if i != 0}
+
+
+def nearest_palette(hexstr: str) -> Color:
+    h = hexstr.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    best = min(_PAL_RGB, key=lambda i: (r - _PAL_RGB[i][0]) ** 2
+               + (g - _PAL_RGB[i][1]) ** 2 + (b - _PAL_RGB[i][2]) ** 2)
+    return palette(best)
 
 
 def state_color(v):
@@ -105,15 +119,25 @@ class WebUI:
                 region = [tuple(c) for c in a.get("cells", [])]
                 if not region:
                     continue
-                kind = a.get("type", "twinkle")
-                if kind == "breathe":
-                    self.con.animate(_anim.Breathe(region, color=hex_to_rgb(a.get("color", "#0030ff"))))
+                kind = a.get("type", "pulse")
+                col = a.get("color", "#1a90ff")
+                if kind in ("pulse", "flash"):        # hardware-driven, flicker-free
+                    self.con.pulse_field(region, nearest_palette(col), mode=kind)
+                elif kind == "breathe":
+                    self.con.animate(_anim.Breathe(region, color=hex_to_rgb(col)))
                 elif kind == "rainbow":
                     self.con.animate(_anim.RainbowWave(region))
                 else:
                     self.con.animate(_anim.Twinkle(region))
+            self.con.intensity = float(config.get("intensity", 0.5))
             self.config = config
             self.con.start()
+
+    def set_intensity(self, value: float) -> None:
+        value = max(0.05, min(1.0, float(value)))
+        self.con.intensity = value          # live; next animation frame uses it
+        self.config["intensity"] = value
+        self.save()
 
     # -- live state for the browser -----------------------------------------
     def state(self) -> dict:
@@ -126,7 +150,8 @@ class WebUI:
             meta["label"] = getattr(w, "label", None)
             meta["kind"] = "prompt" if isinstance(w, PromptButton) else "action"
         return {"connected": self.con.lp.connected, "cells": cells,
-                "dispatch": self.dispatch_mode}
+                "dispatch": self.dispatch_mode, "intensity": self.con.intensity,
+                "frozen": self.con.frozen}
 
     def press(self, x: int, y: int) -> None:
         self.con._route(ButtonEvent(x, y, True, 127, "note", 0))
@@ -186,6 +211,12 @@ def make_handler(app: WebUI):
                 elif self.path == "/api/press":
                     b = self._read_body()
                     app.press(int(b["x"]), int(b["y"]))
+                    self._json({"ok": True})
+                elif self.path == "/api/intensity":
+                    app.set_intensity(self._read_body()["value"])
+                    self._json({"ok": True})
+                elif self.path == "/api/freeze":
+                    app.con.frozen = bool(self._read_body().get("on"))
                     self._json({"ok": True})
                 else:
                     self.send_error(404)

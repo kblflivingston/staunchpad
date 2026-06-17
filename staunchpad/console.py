@@ -40,6 +40,19 @@ from .dispatch import JobQueue
 from .widgets import App, Widget
 
 
+def _changed_enough(old, new) -> bool:
+    """True if ``new`` differs from ``old`` enough to warrant resending the LED.
+
+    RGB colours need a >=2 (of 63) step on some channel; this throttles the
+    per-frame churn of smooth gradients without visible banding.
+    """
+    if old is None:
+        return True
+    if old.is_rgb and new.is_rgb:
+        return any(abs(a - b) >= 2 for a, b in zip(old.rgb, new.rgb))
+    return old != new
+
+
 class State(Enum):
     IDLE = "idle"
     PRESSED = "pressed"
@@ -182,11 +195,21 @@ class PromptButton(ActionButton):
 class Console(App):
     """An :class:`App` plus a job queue, a queue watcher, and an animation loop."""
 
-    def __init__(self, lp=None, queue: JobQueue | None = None, fps: int = 30,
-                 archive_done: bool = True, **launchpad_kwargs):
+    def __init__(self, lp=None, queue: JobQueue | None = None, fps: int = 15,
+                 intensity: float = 0.5, archive_done: bool = True, **launchpad_kwargs):
         super().__init__(lp=lp, **launchpad_kwargs)
         self.queue = queue or JobQueue()
         self.fps = fps
+        # global animation brightness 0..1. Lower draws less current over USB,
+        # which reduces faint "heat-lightning" flicker on neighbouring LEDs.
+        self.intensity = intensity
+        # when frozen, the board holds its last frame and we send nothing —
+        # useful for diagnosing whether flicker comes from the update stream.
+        self.frozen = False
+        # hardware pulse/flash "fields": set once, animated by the device itself
+        # (no ongoing MIDI), so they don't cause update-stream flicker.
+        self.hw_fields: list = []          # list of (cells, palette Color, mode)
+        self._hw_cells: dict = {}          # cell -> Color, for UI mirroring
         self.archive_done = archive_done
         self.animations: list = []
         self._jobs: dict[str, PromptButton] = {}
@@ -217,17 +240,58 @@ class Console(App):
 
     # -- animations ---------------------------------------------------------
     def animate(self, animation):
-        """Register an ambient animation (see :mod:`staunchpad.animations`)."""
+        """Register a *streamed* ambient animation (see :mod:`staunchpad.animations`).
+
+        Note: streamed animations send LED updates every frame, which on this
+        hardware causes faint flicker on idle LEDs. For flicker-free ambient use
+        :meth:`pulse_field` / :meth:`flash_field`.
+        """
         self.animations.append(animation)
         return animation
 
+    def pulse_field(self, region, color, mode: str = "pulse"):
+        """A flicker-free ambient field: each cell is set *once* to hardware
+        pulse/flash a palette ``color``; the device animates it with no further
+        MIDI. ``mode`` is ``"pulse"`` or ``"flash"``."""
+        cells = [tuple(c) for c in region]
+        self.hw_fields.append((cells, color, mode))
+        if self._threads:                  # already running -> apply now
+            self._apply_field(cells, color, mode)
+        return (cells, color, mode)
+
+    def flash_field(self, region, color):
+        return self.pulse_field(region, color, mode="flash")
+
+    def _apply_field(self, cells, color, mode) -> None:
+        for x, y in cells:
+            if mode == "flash":
+                self.lp.flash(x, y, color)
+            else:
+                self.lp.pulse(x, y, color)
+            self._hw_cells[(x, y)] = color
+
+    def _apply_hardware(self) -> None:
+        self._hw_cells = {}
+        for cells, color, mode in self.hw_fields:
+            self._apply_field(cells, color, mode)
+
     def _anim_frame(self) -> None:
-        """Render one animation frame (diffed) using the persistent clock."""
+        """Render one animation frame (diffed) using the persistent clock.
+
+        A cell is only resent when its colour changes *meaningfully* — this keeps
+        a large region from flooding the device with a big SysEx every frame,
+        which can make the MK2 misparse and flicker stray LEDs.
+        """
+        if self.frozen:
+            return
         t = time.time() - self._epoch
+        inten = self.intensity
         changed: dict[tuple[int, int], Color] = {}
         for anim in self.animations:
             for cell, c in anim.frame(t).items():
-                if anim._last.get(cell) != c:
+                if inten < 1.0:
+                    c = c.dimmed(inten)
+                if _changed_enough(anim._last.get(cell), c):
                     anim._last[cell] = c
                     changed[cell] = c
         if changed:
@@ -247,12 +311,15 @@ class Console(App):
                 out[(w.x, w.y)] = w.display_color()
         for anim in self.animations:
             out.update(anim._last)
+        out.update(self._hw_cells)
         return out
 
     def clear_layout(self) -> None:
         """Remove all buttons and animations (used when rebuilding from config)."""
         self.widgets.clear()
         self.animations.clear()
+        self.hw_fields.clear()
+        self._hw_cells = {}
         if self.lp.connected:
             self.lp.clear()
 
@@ -267,7 +334,8 @@ class Console(App):
         self.stop()
         self.lp.clear()
         self.redraw()
-        self._anim_frame()        # paint animations immediately so rebuilds don't blink
+        self._apply_hardware()    # (re)arm hardware pulse/flash fields
+        self._anim_frame()        # paint streamed animations immediately so rebuilds don't blink
         # a fresh event per run; each loop captures its own so swapping is race-free
         self._stop = threading.Event()
         self._threads = [

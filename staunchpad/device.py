@@ -242,9 +242,11 @@ class Launchpad:
                 quads.append((number, *c.rgb))
             else:
                 pairs.append((number, c.velocity()))
-        for chunk in _chunks(pairs, 80):
+        # Smaller SysEx chunks parse more reliably on the MK2 than one big blob
+        # sent every animation frame (which can cause stray-LED glitches).
+        for chunk in _chunks(pairs, 16):
             self._send(P.set_leds_msg(chunk))
-        for chunk in _chunks(quads, 80):
+        for chunk in _chunks(quads, 16):
             self._send(P.set_leds_rgb_msg(chunk))
 
     # -- text ---------------------------------------------------------------
