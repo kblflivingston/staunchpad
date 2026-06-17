@@ -3,7 +3,7 @@
     .venv/bin/python examples/app_demo.py
 """
 
-from launchpad import App, Momentary, RadioGroup, Toggle, color
+from staunchpad import App, Momentary, RadioGroup, Toggle, color
 
 
 def main():

@@ -1,6 +1,6 @@
 import pytest
 
-from launchpad import protocol as P
+from staunchpad import protocol as P
 
 H = [0xF0, 0x00, 0x20, 0x29, 0x02, 0x18]   # MK2 SysEx header
 END = 0xF7

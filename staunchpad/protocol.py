@@ -2,7 +2,7 @@
 
 This module is the single source of truth for the wire protocol. Everything
 here is pure: each function returns a ``list[int]`` of MIDI bytes. The
-:class:`~launchpad.device.Launchpad` class is the only thing that puts these on
+:class:`~staunchpad.device.Launchpad` class is the only thing that puts these on
 the wire, which keeps the protocol fully unit-testable without hardware.
 
 References ("PRM p.N") point at Novation's *Launchpad MK2 Programmer's Reference

@@ -3,7 +3,7 @@
 This is the "let creativity run wild" layer. Compose widgets onto a surface and
 let the App route events to them::
 
-    from launchpad import App, Toggle, Momentary, RadioGroup, color
+    from staunchpad import App, Toggle, Momentary, RadioGroup, color
 
     app = App()
     Toggle(app, 0, 1, on_color=color.GREEN, on_change=lambda w: print(w.state))

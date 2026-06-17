@@ -1,7 +1,7 @@
 import pytest
 
-from launchpad import color
-from launchpad.color import Color, palette, rgb
+from staunchpad import color
+from staunchpad.color import Color, palette, rgb
 
 
 def test_named_palette_indices_match_prm_examples():

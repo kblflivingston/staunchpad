@@ -5,7 +5,7 @@
 
 import time
 
-from launchpad import Launchpad, color
+from staunchpad import Launchpad, color
 
 
 def rgb_sweep(lp):

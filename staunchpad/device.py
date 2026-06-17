@@ -24,7 +24,7 @@ class ButtonEvent:
     """A button press or release.
 
     Attributes:
-        x, y:     surface coordinates (see :mod:`launchpad.layout`).
+        x, y:     surface coordinates (see :mod:`staunchpad.layout`).
         pressed:  ``True`` on press, ``False`` on release.
         velocity: raw MIDI velocity/value (127 on press, 0 on release).
         kind:     ``"note"`` (grid/scene) or ``"cc"`` (top row).

@@ -1,4 +1,4 @@
-from launchpad import layout as L
+from staunchpad import layout as L
 
 
 def test_grid_corners_session_layout():

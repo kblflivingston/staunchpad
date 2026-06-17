@@ -11,8 +11,8 @@ Edit BINDINGS below, then:
 import subprocess
 import threading
 
-from launchpad import App, Launchpad, color
-from launchpad.device import ButtonEvent
+from staunchpad import App, Launchpad, color
+from staunchpad.device import ButtonEvent
 
 # (x, y) -> (idle_color, shell command)
 BINDINGS = {

@@ -21,5 +21,5 @@ verified against real hardware:
 - `scenes`: save and recall full-surface snapshots as JSON.
 - `widgets`: `App` runloop plus `Toggle`, `Momentary`, `RadioGroup`,
   `ColorCycle`, and `Button`.
-- `launchpad-detect` console command and five runnable examples.
+- `staunchpad-detect` console command and five runnable examples.
 - 21 hardware-free unit tests covering the protocol, colour, and layout layers.

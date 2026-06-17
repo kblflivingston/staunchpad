@@ -1,4 +1,6 @@
-# launchpad-controller
+# staunchpad
+
+*Keep your faithful old Launchpad on your desk forever.*
 
 A clean, fully-featured Python interface for the **Novation Launchpad MK2**. It
 turns the grid into a programmable surface for your own tools and workflows:
@@ -7,6 +9,11 @@ direct LED control with full **RGB**, the 128-colour palette, hardware
 events, scene save/recall, and a high-level widget layer for building things
 fast.
 
+> **staunch** *(adj.)* — loyal and steadfast. This started as a Launchpad MK2
+> that no longer earned its keep in a DAW. Rather than retire it, *staunchpad*
+> repurposes it as a dependable custom controller: a faithful old board that
+> stays on the desk and does whatever you teach it to.
+
 Verified working against real hardware (firmware 0171). The wire protocol is
 implemented straight from Novation's *Launchpad MK2 Programmer's Reference
 Manual* and unit-tested against its documented byte sequences.
@@ -14,7 +21,7 @@ Manual* and unit-tested against its documented byte sequences.
 ## Install
 
 ```bash
-cd launchpad-controller
+cd staunchpad
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"        # or: pip install -r requirements.txt
 ```
@@ -25,7 +32,7 @@ Plug the Launchpad in and run the detector — it lists MIDI ports, identifies t
 model, and lights a test pattern:
 
 ```bash
-.venv/bin/python examples/detect.py        # or: launchpad-detect
+.venv/bin/python examples/detect.py        # or: staunchpad-detect
 ```
 
 > **Not appearing?** If the unit shows a drifting light show ("Vegas mode"), it
@@ -36,7 +43,7 @@ model, and lights a test pattern:
 ## Hello, lights
 
 ```python
-from launchpad import Launchpad, color
+from staunchpad import Launchpad, color
 
 with Launchpad() as lp:                 # auto-detects the first "Launchpad" port
     lp.set(0, 1, color.RED)             # palette colour — one MIDI message
@@ -66,7 +73,7 @@ One friendly grid for everything (Session layout, selected automatically):
   8  □  □  □  □  □  □  □  □    ●
 ```
 
-`launchpad.layout.xy_to_midi(x, y)` / `midi_to_xy(kind, num)` convert both ways.
+`staunchpad.layout.xy_to_midi(x, y)` / `midi_to_xy(kind, num)` convert both ways.
 (The MK2's own "decimal" note numbering — 11 bottom-left … 88 top-right — is
 hidden behind this so y increases downward and x rightward.)
 
@@ -75,7 +82,7 @@ hidden behind this so y increases downward and x rightward.)
 Two ways to light an LED, and you can mix them freely:
 
 ```python
-from launchpad import color
+from staunchpad import color
 
 # palette: a preset index 0..127 (one MIDI message; flash/pulse use these)
 color.RED, color.ORANGE, color.YELLOW, color.GREEN, color.BLUE
@@ -109,7 +116,7 @@ color.parse("green"); color.parse(45); color.parse([0, 0, 63]); color.parse("#ff
 ### High-level widgets
 
 ```python
-from launchpad import App, Toggle, Momentary, RadioGroup, ColorCycle, color
+from staunchpad import App, Toggle, Momentary, RadioGroup, ColorCycle, color
 
 app = App()
 Toggle(app, 0, 1, on_color=color.GREEN, on_change=lambda w: print(w.state))
@@ -140,7 +147,7 @@ Pure-protocol logic is fully unit-tested without hardware:
 ## Architecture
 
 ```
-launchpad/
+staunchpad/
   protocol.py   pure MIDI/SysEx byte builders (the wire spec; the source of truth)
   color.py      Color model: palette index OR RGB, named palette, parse()
   layout.py     (x, y) <-> note/CC mapping for the Session layout

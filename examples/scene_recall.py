@@ -12,8 +12,8 @@ Scenes persist to scenes/*.json next to this script.
 
 from pathlib import Path
 
-from launchpad import Launchpad, color, scenes
-from launchpad.device import ButtonEvent
+from staunchpad import Launchpad, color, scenes
+from staunchpad.device import ButtonEvent
 
 SCENE_DIR = Path(__file__).parent / "scenes"
 SCENE_DIR.mkdir(exist_ok=True)

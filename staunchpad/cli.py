@@ -1,4 +1,4 @@
-"""``launchpad-detect`` console command: find, identify, and self-test a device.
+"""``staunchpad-detect`` console command: find, identify, and self-test a device.
 
 Installed as a script entry point (see pyproject), and also used by
 ``examples/detect.py``. Run it the first time you plug a Launchpad in.

@@ -1,8 +1,8 @@
-"""launchpad — a programming interface for the Novation Launchpad MK2.
+"""staunchpad — a programming interface for the Novation Launchpad MK2.
 
 Quick start::
 
-    from launchpad import Launchpad, color
+    from staunchpad import Launchpad, color
 
     lp = Launchpad()                  # auto-detects the device
     lp.set(0, 1, color.RED)           # palette colour (one MIDI message)
